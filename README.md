@@ -12,7 +12,7 @@ Single-player. Keyboard and touch controls. Progress saves in your browser.
 
 ## The island is calling
 
-The cover above is promotional artwork. Every image below is an unedited screenshot from the submission build. Click an image to see it at full size.
+The cover above is promotional artwork. Every gallery image below is an unedited portrait screenshot from the submission build, captured at 1080 x 1920. Click an image to see it at full size.
 
 | Your island hub | Pick your next challenge |
 | --- | --- |
