@@ -16,19 +16,19 @@ The cover above is promotional artwork. Every gallery image below is an unedited
 
 | Your island hub | Pick your next challenge |
 | --- | --- |
-| [![Island hub with restoration shrine and hat merchant](gallery/02-island-hub.png)](gallery/02-island-hub.png) | [![UFO Rush and Bubble Rush shrines in the island garden](gallery/03-arcade-shrines.png)](gallery/03-arcade-shrines.png) |
+| [![Island hub with restoration shrine](gallery/portrait/02-island-hub.png)](gallery/portrait/02-island-hub.png) | [![Arcade shrines in the island garden](gallery/portrait/03-arcade-shrines.png)](gallery/portrait/03-arcade-shrines.png) |
 
 | Bring the colour back | Run for it |
 | --- | --- |
-| [![Island Restoration with PAINT supply and shrine objectives](gallery/04-island-restoration.png)](gallery/04-island-restoration.png) | [![GLORB jumping toward coins in Temple Dash](gallery/05-temple-dash.png)](gallery/05-temple-dash.png) |
+| [![Island Restoration with PAINT supply and shrine objectives](gallery/portrait/04-island-restoration.png)](gallery/portrait/04-island-restoration.png) | [![GLORB jumping toward coins in Temple Dash](gallery/portrait/05-temple-dash.png)](gallery/portrait/05-temple-dash.png) |
 
 | Leave the island behind | Drop the beat |
 | --- | --- |
-| [![GLORB pilots a UFO through the asteroid belt](gallery/06-ufo-rush.png)](gallery/06-ufo-rush.png) | [![Bubble Rush rhythm gameplay with a twelve-note combo](gallery/07-bubble-rush.png)](gallery/07-bubble-rush.png) |
+| [![GLORB pilots a UFO through the asteroid belt](gallery/portrait/06-ufo-rush.png)](gallery/portrait/06-ufo-rush.png) | [![Bubble Rush rhythm gameplay with a twelve-note combo](gallery/portrait/07-bubble-rush.png)](gallery/portrait/07-bubble-rush.png) |
 
 | Find your look | Meet Samurai GLORB |
 | --- | --- |
-| [![The hat shop sells Samurai, Cowboy and baseball hats for Stars](gallery/08-hat-shop.png)](gallery/08-hat-shop.png) | [![A conversation with Samurai GLORB at the island dojo](gallery/09-samurai-dojo.png)](gallery/09-samurai-dojo.png) |
+| [![The hat shop sells Samurai, Cowboy and baseball hats for Stars](gallery/portrait/08-hat-shop.png)](gallery/portrait/08-hat-shop.png) | [![A conversation with Samurai GLORB at the island dojo](gallery/portrait/09-samurai-dojo.png)](gallery/portrait/09-samurai-dojo.png) |
 
 ## Controls
 
