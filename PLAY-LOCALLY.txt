@@ -1,0 +1,8 @@
+PLAY GLORB
+
+1. Extract the entire ZIP.
+2. On Windows, double-click Start GLORB.cmd.
+3. Keep its window open while playing. Close it to stop.
+
+No internet connection is needed. On other systems, serve this folder with a
+local web server. Do not open index.html directly with a file:// address.

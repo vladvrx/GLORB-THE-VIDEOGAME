@@ -1,0 +1,23 @@
+GLORB
+
+Three.js r150, MIT License. Copyright 2010-2023 Three.js Authors.
+Full license: vendor/three/LICENSE.txt
+Source: https://github.com/mrdoob/three.js/tree/r150
+GLTFLoader, DRACOLoader and BufferGeometryUtils use local import paths.
+
+Draco, Apache License 2.0. Copyright 2016 Google Inc.
+Full license: vendor/draco/LICENSE.txt
+Source: https://github.com/google/draco
+Decoder distribution: Three.js r150 examples/jsm/libs/draco/gltf.
+
+Outfit, SIL Open Font License 1.1.
+Full license and copyright: assets/fonts/OFL.txt
+Source: https://github.com/google/fonts/tree/main/ofl/outfit
+
+The character, UFO, smiley texture, sky image and GLORB logo were supplied
+with entrant-confirmed rights. Game code, procedural scenery and synthesized
+audio were created for this project.
+
+Main music: entrant-supplied Tropical Tycoon (Remix).
+Submission and public-performance rights for this recording still require
+the entrant's confirmation.
