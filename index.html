@@ -38,7 +38,12 @@ button:focus-visible { outline: 3px solid #ffe286; outline-offset: 4px; }
 .original-joystick { position: fixed; pointer-events: none; z-index: 11; width: 86px; height: 86px; margin: -43px; border: 2px solid #fff8; border-radius: 50%; background: #fff2; opacity: 0; }
 .original-joystick.active { opacity: 1; }
 .original-joystick::after { content: ''; display: block; width: 34px; height: 34px; border: 2px solid white; border-radius: 50%; margin: 24px; transform: translate(var(--dx,0px),var(--dy,0px)); }
-#preloader { position: fixed; inset: 0; z-index: 1100; background: #70bfe4; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 35px; }
+#preloader { position: fixed; inset: 0; z-index: 1100; background: radial-gradient(ellipse at 15% 15%,#41326588,transparent 55%),radial-gradient(ellipse at 90% 80%,#15487588,transparent 50%),#080b25; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 35px; }
+#preloader::before { content: ''; position:absolute; inset:0; pointer-events:none; background-image:radial-gradient(circle,#fff 1px,transparent 1.8px),radial-gradient(circle,#99dfff 1px,transparent 1.5px);background-size:113px 137px,191px 173px;background-position:23px 17px,65px 41px;opacity:.5; }
+#preloader > * { z-index:1; }
+.arrival-title { filter:drop-shadow(0 4px 24px #b985ff80); }
+.arrival-sound,.loading-sound { min-height:44px; padding:10px 18px;border:1px solid #bdceff80;border-radius:24px;background:#111936d9;color:#e4eeff;pointer-events:auto; }
+.arrival-sound { position:absolute;right:calc(env(safe-area-inset-right) + 18px);bottom:calc(env(safe-area-inset-bottom) + 20px); }
 #preloader .original-wordmark { width: min(340px, 85vw); height: auto; aspect-ratio: 140 / 53; }
 .preloader-counter { font-size: 24px; font-weight: 700; }
 html.glorb-in-runner .app-header, html.glorb-in-runner .jump-button, html.glorb-in-runner .dance-button { display: none !important; }
@@ -875,7 +880,7 @@ html.glorb-hurt::after { content: ""; position: fixed; inset: 0; box-shadow: ins
   .original-colors { margin: 16px 0; }
 }
 </style></head>
-<body><aside id="preloader"><img class="original-wordmark" src="./assets/glorb-logo.png" alt="GLORB"><p class="preloader-counter">0</p></aside><div id="app"></div>
+<body><aside id="preloader"><img class="original-wordmark" src="./assets/glorb-logo.png" alt="GLORB"><p class="preloader-counter">0</p><button class="loading-sound">Enable sound</button></aside><div id="app"></div>
 <script>
 if (location.protocol === 'file:') {
   const counter = document.querySelector('.preloader-counter');
@@ -929,7 +934,14 @@ const GLORB_ACTIVITY_COLORS = {
 };
 
 class LocalAudio {
-  constructor(app) { this.app=app; this.context=null; this.master=null; this.musicBus=null; this.music=null; }
+  constructor(app) {
+    this.app=app; this.context=null; this.master=null; this.musicBus=null;
+    this.music=new Audio('./reference/assets/tropical-tycoon-remix.m4a');
+    this.introMusic=new Audio('./reference/assets/electro-bug-2.mp3');
+    this.tracks={intro:this.introMusic,hub:this.music};
+    this.trackGains={}; this.activeTrack=null;
+    for(const track of Object.values(this.tracks)){track.loop=true;track.preload='auto';}
+  }
   async unlock() {
     if (!this.context) {
       this.context = new AudioContext();
@@ -939,17 +951,33 @@ class LocalAudio {
       this.musicBus = this.context.createGain();
       this.musicBus.gain.value = 10 ** (-6 / 20);
       this.musicBus.connect(this.master);
-      this.music = new Audio('./reference/assets/tropical-tycoon-remix.m4a');
-      this.music.loop=true;
-      this.music.preload='auto';
-      this.context.createMediaElementSource(this.music).connect(this.musicBus);
+      for(const [name,track] of Object.entries(this.tracks)){
+        const gain=this.context.createGain();gain.gain.value=0;
+        this.context.createMediaElementSource(track).connect(gain);gain.connect(this.musicBus);
+        this.trackGains[name]=gain;
+      }
     }
     await this.context.resume();
-    this.music.play().catch(()=>{});
+    this.update();
+    if(this.activeTrack)this.tracks[this.activeTrack].play().catch(()=>{});
   }
   getContext() { return this.context; }
   getInput() { return this.master; }
   update() {
+    const desired=!this.app.$webgl || this.app.$webgl.scenes.currentSceneID==='IslandIntro'
+      ? 'intro' : this.app.__hub?.active && !this.app.__quickGame?.active ? 'hub' : null;
+    if(this.context && desired!==this.activeTrack){
+      this.activeTrack=desired;
+      for(const [name,track] of Object.entries(this.tracks)){
+        const gain=this.trackGains[name].gain;
+        // The supplied intro is quieter than the hub recording. Add 10 dB
+        // before the shared -6 dB music bus and master attenuation.
+        const level=name==='intro'?10**(10/20):1;
+        gain.setTargetAtTime(name===desired?level:0,this.context.currentTime,.18);
+        if(name===desired)track.play().catch(()=>{});
+        else setTimeout(()=>{if(this.activeTrack!==name)track.pause();},1000);
+      }
+    }
     if (this.master) this.master.gain.setTargetAtTime(
       this.app.$store.isAudioMuted || document.hidden ? 0 : .32,
       this.context.currentTime, .025);
@@ -1086,14 +1114,16 @@ class IslandPlayer {
     if (!app.__runner?.active) {
       if(this.joystick.direction.y>0 && this.scene.physics.playerDistanceFromFloor<.15)this.verticalSpeed=9.4;
       this.verticalSpeed-=this.scene.physics.gravity*dt;
-      this.base.position.y=Math.max(SPAWN.y,this.base.position.y+this.verticalSpeed*dt);
-      if(this.base.position.y===SPAWN.y)this.verticalSpeed=0;
+      app.__fruitParkour?.jetpack?.step(dt,this);
+      const floor=app.__fruitParkour?.floorAt(this.base.position.x,this.base.position.z,this.base.position.y)??SPAWN.y;
+      this.base.position.y=Math.max(floor,this.base.position.y+this.verticalSpeed*dt);
+      if(this.base.position.y===floor)this.verticalSpeed=0;
       this.base.position.x=THREE.MathUtils.clamp(this.base.position.x, WEST_MIN_X+.6,WEST_MAX_X-.6);
       this.base.position.z=THREE.MathUtils.clamp(this.base.position.z, WEST_MIN_Z+.6,WEST_MAX_Z-.6);
-      this.scene.physics.playerDistanceFromFloor=this.base.position.y-SPAWN.y;
-      this.scene.physics.playerIsCollidingGround=this.base.position.y<=SPAWN.y+.02;
+      this.scene.physics.playerDistanceFromFloor=this.base.position.y-floor;
+      this.scene.physics.playerIsCollidingGround=this.base.position.y<=floor+.02;
       this.isOnFloorDebounced=this.scene.physics.playerIsCollidingGround;
-      const next=app.__danceState?.holding?'Action':running&&movement.lengthSq()>.001?'Run':'Idle';
+      const next=app.__fruitParkour?.jetpack?.flying?'Idle':app.__danceState?.holding?'Action':running&&movement.lengthSq()>.001?'Run':'Idle';
       if(app.__survival?.run.phase!=='won'&&this.currentAnimation!==next)this.setAnimation(next);
     }
     this.animationMixer.update(dt);
@@ -1173,6 +1203,55 @@ function createGlorbAvatar(app) {
   avatar.setAnimation('Idle');app.__hatShop?.applyHatToAvatar(avatar);return avatar;
 }
 
+function installMovementVfx(app,scene){
+  const group=new THREE.Group();group.name='glorb-movement-vfx';scene.base.add(group);
+  const geometry=new THREE.SphereGeometry(1,7,5),ringGeometry=new THREE.RingGeometry(.77,1,32);
+  const pool=Array.from({length:48},()=>{
+    const material=new THREE.MeshBasicMaterial({color:0xffecc1,transparent:true,depthWrite:false});
+    const mesh=new Mesh(geometry,material);mesh.visible=false;group.add(mesh);
+    return {mesh,life:0,total:1,vx:0,vz:0,vy:0,size:0};
+  });
+  const rings=Array.from({length:4},()=>{
+    const mesh=new Mesh(ringGeometry,new THREE.MeshBasicMaterial({color:0xb6fff0,transparent:true,depthWrite:false,side:THREE.DoubleSide}));
+    mesh.rotation.x=-Math.PI/2;mesh.visible=false;group.add(mesh);return {mesh,life:0};
+  });
+  const stats={steps:0,jumps:0,landings:0,active:0,group};app.__movementVfx=stats;
+  let last=scene.player.base.position.clone(),grounded=true,distance=0,ready=false;
+  function burst(p,count,size,color){
+    for(let i=0;i<count;i++){
+      const item=pool.find(p=>p.life<=0);if(!item)break;
+      const angle=Math.random()*Math.PI*2;
+      Object.assign(item,{life:.45+Math.random()*.2,total:.65,vx:Math.cos(angle)*1.1,vz:Math.sin(angle)*1.1,vy:.5+Math.random(),size});
+      item.mesh.position.set(p.x+Math.cos(angle)*.22,p.y+.07,p.z+Math.sin(angle)*.22);
+      item.mesh.material.color.setHex(color);item.mesh.visible=true;
+    }
+  }
+  return dt=>{
+    const p=scene.player.base.position;
+    const enabled=app.$webgl.scenes.current===scene&&!app.__quickGame?.active&&!app.__runner?.active;
+    group.visible=enabled;
+    if(!enabled){ready=false;for(const item of [...pool,...rings]){item.life=0;item.mesh.visible=false;}return;}
+    const onFloor=scene.physics.playerIsCollidingGround;
+    const moved=Math.hypot(p.x-last.x,p.z-last.z);
+    if(ready&&moved<3){
+      if(onFloor&&grounded){distance+=moved;if(distance>.85){distance=0;stats.steps++;burst(p,3,.12,0xffecc1);}}
+      if(!onFloor&&grounded&&scene.player.verticalSpeed>0){stats.jumps++;burst(last,10,.18,0xb5fff0);}
+      if(onFloor&&!grounded){
+        stats.landings++;burst(p,12,.19,0xffecc1);
+        const ring=rings.find(r=>r.life<=0)||rings[0];ring.life=.45;ring.mesh.visible=true;ring.mesh.position.set(p.x,p.y+.04,p.z);
+      }
+    }
+    ready=true;grounded=onFloor;last.copy(p);
+    for(const item of pool){
+      if(item.life<=0)continue;item.life=Math.max(0,item.life-dt);item.mesh.visible=item.life>0;
+      item.mesh.position.x+=item.vx*dt;item.mesh.position.z+=item.vz*dt;item.mesh.position.y+=item.vy*dt;
+      const fade=item.life/item.total;item.mesh.scale.setScalar(item.size*(1+(1-fade)*1.5));item.mesh.material.opacity=fade*.7;
+    }
+    for(const ring of rings){if(ring.life<=0)continue;ring.life=Math.max(0,ring.life-dt);ring.mesh.visible=ring.life>0;ring.mesh.scale.setScalar(.4+(1-ring.life/.45)*1.5);ring.mesh.material.opacity=ring.life/.45*.65;}
+    stats.active=pool.filter(p=>p.life>0).length+rings.filter(p=>p.life>0).length;
+  };
+}
+
 function createWater() {
 
 
@@ -1190,6 +1269,10 @@ function createWater() {
       vec3 color=nearColor*(.98+wave*.035+ripple*.04);
       float glint=smoothstep(.86,.98,ripple)*(.3+.7*smoothstep(-.1,.7,wave));
       color=mix(color,vec3(.70,.94,.88),glint*.24);
+      // Moving, fine caustic highlights add depth without changing the island palette.
+      float caustic=sin(bend.x*3.7+sin(bend.y*2.1+elapsed*.45))*cos(bend.y*3.1-elapsed*.38);
+      float foam=smoothstep(.90,.995,caustic);
+      color=mix(color,vec3(.84,1.0,.96),foam*.24);
       color=mix(color,farColor,smoothstep(120.0,650.0,distanceToEye));
       gl_FragColor=vec4(color,1.0);}`
   });
@@ -1328,9 +1411,29 @@ function installOriginalChrome(app,host) {
 
 function createArrival(webgl,ship,arrivalLand) {
   const base=new THREE.Scene();
-  base.add(new THREE.HemisphereLight(0xeaffdf,0x713643,1.05));
+  base.background=new THREE.Color(0x080b25);
+  base.add(new THREE.HemisphereLight(0xb8ddff,0x563365,1.05));
   const light=new THREE.DirectionalLight(0xfff3d0,.95);light.position.set(-10,40,15);base.add(light);
-  base.add(arrivalLand.scene);
+  // The space set belongs only to the arrival scene. The island is unchanged.
+  const starPositions=[],starColors=[];
+  let seed=7143;
+  const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
+  for(let i=0;i<1200;i++){
+    const theta=random()*Math.PI*2,vertical=random()*2-1,radius=280+random()*420;
+    const ring=Math.sqrt(1-vertical*vertical);
+    starPositions.push(-23+Math.cos(theta)*ring*radius,24+vertical*radius,-89+Math.sin(theta)*ring*radius);
+    const color=new THREE.Color().setHSL(.55+random()*.22,.25,.65+random()*.35);
+    starColors.push(color.r,color.g,color.b);
+  }
+  const starsGeometry=new BufferGeometry();
+  starsGeometry.setAttribute('position',new BufferAttribute(new Float32Array(starPositions),3));
+  starsGeometry.setAttribute('color',new BufferAttribute(new Float32Array(starColors),3));
+  const stars=new THREE.Points(starsGeometry,new THREE.PointsMaterial({size:1.2,vertexColors:true,sizeAttenuation:true}));
+  stars.name='arrival-starfield';base.add(stars);
+  const planet=new Mesh(new THREE.SphereGeometry(19,40,24),new THREE.MeshPhongMaterial({color:0x9674da,shininess:12}));
+  planet.position.set(50,47,-40);planet.scale.setScalar(.55);planet.name='arrival-ringed-planet';base.add(planet);
+  const rings=new Mesh(new THREE.RingGeometry(25,34,80),new MeshBasicMaterial({color:0x8ad9ed,side:THREE.DoubleSide,transparent:true,opacity:.55}));
+  rings.rotation.x=1.1;rings.rotation.y=.25;planet.add(rings);
   ship.scene.traverse(object=>{
     if(object.name==='Collider')object.visible=false;
     if(object.isMesh&&object.name!=='Collider'){
@@ -1363,6 +1466,14 @@ function createArrival(webgl,ship,arrivalLand) {
     }
   }
   ui.append(logo,start,bubble);document.body.append(ui);
+  const sound=dom_el('button',{class:'arrival-sound',text:'Enable sound',onClick:()=>{
+    const playing=webgl.audio.context?.state==='running'&&!appStore.isAudioMuted;
+    appStore.isAudioMuted=!!playing;
+    if(!playing)webgl.audio.unlock();
+  }});ui.append(sound);
+  watch(()=>[webgl.audio.context?.state,appStore.isAudioMuted],()=>{
+    sound.textContent=webgl.audio.context?.state==='running'&&!appStore.isAudioMuted?'Mute sound':'Enable sound';
+  });
   scene.draw=dt=>{
     state.elapsed+=dt;
     const settle=THREE.MathUtils.smoothstep(state.elapsed,0,3.5);
@@ -1372,8 +1483,9 @@ function createArrival(webgl,ship,arrivalLand) {
     vessel.position.y=23.8+Math.sin(state.elapsed*1.7)*.08+progress*12;
     player.base.position.set(vessel.position.x,vessel.position.y+.7,vessel.position.z);
     player.animationMixer.update(dt);
-    camera.position.set(vessel.position.x+THREE.MathUtils.lerp(-18,-8.4,settle),
-      vessel.position.y+THREE.MathUtils.lerp(60,.5,settle),vessel.position.z+THREE.MathUtils.lerp(-150,-2.6,settle));
+    const opening=state.stage==='opening';
+    camera.position.set(vessel.position.x+THREE.MathUtils.lerp(-18,opening?-14:-8.4,settle),
+      vessel.position.y+THREE.MathUtils.lerp(60,opening?6:.5,settle),vessel.position.z+THREE.MathUtils.lerp(-150,opening?-11:-2.6,settle));
     camera.lookAt(vessel.position.x,vessel.position.y+1.9,vessel.position.z-1.8);camera.updateMatrixWorld();
     if(flight===1)webgl.scenes.teleportTo('IslandWest');
   };
@@ -1382,6 +1494,15 @@ function createArrival(webgl,ship,arrivalLand) {
 }
 
 async function startOriginalEngine() {
+  const store={sceneStates:{Intro:0,Tutorial:2,Playing:3},sceneState:0,isTransitionActive:false,
+    isCinematicActive:false,isDialogVisible:false,isCustomizeOpen:false,isHeaderVisible:true,isAudioMuted:false};
+  const app={$store:store,$savestate:{setVariable(){}},$route:{name:'Intro'},$viewport:{width:innerWidth}};
+  const audio=new LocalAudio(app);
+  const loadingSound=document.querySelector('.loading-sound');
+  loadingSound?.addEventListener('click',()=>{
+    audio.unlock().then(()=>{loadingSound.textContent='Sound enabled';}).catch(()=>{loadingSound.textContent='Try enabling sound';});
+  });
+  audio.unlock().catch(()=>{});
   const counter=document.querySelector('.preloader-counter');
   let completed=0;
   const manager=new THREE.LoadingManager();
@@ -1409,19 +1530,16 @@ async function startOriginalEngine() {
   const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false});
   renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.setSize(innerWidth,innerHeight);
   renderer.outputEncoding=THREE.LinearEncoding;
-  const store={sceneStates:{Intro:0,Tutorial:2,Playing:3},sceneState:0,isTransitionActive:false,
-    isCinematicActive:false,isDialogVisible:false,isCustomizeOpen:false,isHeaderVisible:true,isAudioMuted:false};
-  const app={$store:store,$savestate:{setVariable(){}},$route:{name:'Intro'},$viewport:{width:innerWidth}};
   const size={value:new THREE.Vector2(innerWidth,innerHeight)};
   const webgl={app,faceTexture,renderer:{instance:renderer,drawingBufferSize:size},viewport:{size},
     time:{dt:16.67,paused:false,stop(){this.paused=true;},start(){this.paused=false;}},
     hooks:{beforeFrame:new FrameCallbacks()},store:{renderOrder:{grass:8}},movement:new THREE.Vector2(),scenes:{list:{}}};
-  app.$webgl=webgl;webgl.audio=new LocalAudio(app);
+  app.$webgl=webgl;webgl.audio=audio;
   const island=createIslandScene(webgl,land,character);webgl.scenes.list.IslandWest=island;
+  const updateMovementVfx=installMovementVfx(app,island);
   const arrival=createArrival(webgl,ship,arrivalLand);webgl.scenes.list.IslandIntro=arrival;
   const water=createWater(),sky=createSky(clouds);
   webgl.scenes.current=arrival;webgl.scenes.currentSceneID='IslandIntro';
-  arrival.base.add(water,sky);
   webgl.scenes.teleportTo=async name=>{
     const next=webgl.scenes.list[name];if(!next)throw Error('Unknown local scene: '+name);
     arrival.hide();next.base.add(water,sky);
@@ -1450,9 +1568,10 @@ async function startOriginalEngine() {
     if(webgl.time.paused)return;
     webgl.time.dt=dt*1000;elapsed+=dt;
     sampleInput();for(const poll of subscriptions)poll();webgl.hooks.beforeFrame.emit();
-    app.__hubResidents?.update(dt);app.__hubDojo?.update(dt);
+    app.__hubResidents?.update(dt);app.__hubDojo?.update(dt);app.__fruitParkour?.update(dt);
     document.documentElement.classList.toggle('glorb-in-quickgame',!!app.__quickGame?.active);
     if(app.__quickGame?.active){
+      updateMovementVfx(dt);
       app.__quickGame.update(dt);webgl.audio.update();
       if(app.__quickGame?.active)renderer.render(app.__quickGame.scene,app.__quickGame.camera);
       return;
@@ -1460,6 +1579,11 @@ async function startOriginalEngine() {
     const scene=webgl.scenes.current;
     if(scene===island){
       island.player.triggerUpdate();island.player.afterUpdate();island.camera.afterUpdate();
+      if(app.__fruitParkour?.jetpack?.flying){
+        // Apply after the jump pose hook so thrust keeps a still standing pose.
+        island.player.setIdleAnimation();island.player.animationMixer.setTime(0);
+      }
+      updateMovementVfx(dt);
       if(app.__hub?.active)app.__hub.group.userData.animate?.(elapsed,island.player.base.position);
     }
     else arrival.draw(dt);
@@ -7036,7 +7160,8 @@ function installHubResidents(app, hub) {
   const catalog = [
     {id:'samurai', name:'Samurai', price:50, color:'#65547a'},
     {id:'cowboy', name:'Cowboy', price:35, color:'#b47e4c'},
-    {id:'cap', name:'hat', price:20, color:'#6598c7'}
+    {id:'cap', name:'hat', price:20, color:'#6598c7'},
+    {id:'propeller', name:'Propeller', price:60, color:'#ef6262'}
   ];
   const state = {stars:30, owned:new Set(), equipped:null};
   try {
@@ -7142,7 +7267,17 @@ function installHubResidents(app, hub) {
       const item = new THREE.Mesh(geometry, surface);
       item.position.set(...position); item.scale.set(...scale); hat.add(item); return item;
     }
-    if (id === 'samurai') {
+    if (id === 'propeller') {
+      for(let i=0;i<3;i++)part(new THREE.SphereGeometry(.43,12,8,i*Math.PI*2/3,Math.PI*2/3,0,Math.PI/2),material([0xf26066,0xffd452,0x59a9ed][i]),[0,0,0]);
+      part(new THREE.CylinderGeometry(.45,.45,.055,24),material(0x59a9ed),[0,0,0]);
+      part(new THREE.CylinderGeometry(.035,.035,.19,8),material(0xffd452),[0,.51,0]);
+      const rotor=new THREE.Group();rotor.name='hat-propeller-rotor';rotor.position.y=.63;hat.add(rotor);
+      for(let i=0;i<3;i++){
+        const blade=new THREE.Mesh(new THREE.BoxGeometry(.39,.035,.10),material([0xf26066,0xffd452,0x59a9ed][i]));
+        const angle=i*Math.PI*2/3;blade.position.set(Math.cos(angle)*.17,0,Math.sin(angle)*.17);blade.rotation.y=-angle;rotor.add(blade);
+      }
+      hat.userData.rotor=rotor;
+    } else if (id === 'samurai') {
       const armor = material(0x393849), edge = material(0x685a75), gold = material(0xf4c56c);
       part(new THREE.SphereGeometry(.42, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), armor, [0,.025,0], [1,1,.93]);
       part(new THREE.CylinderGeometry(.48,.53,.09,16), edge, [0,.018,0], [1,1,.93]);
@@ -7299,7 +7434,7 @@ function installHubResidents(app, hub) {
   const displayHats=[];
   for (let i=0;i<3;i++) {
     const displayHat = buildHat(catalog[i].id);
-    displayHat.position.set([-2.65,-1.4,2.05][i],1.68,.61);displayHat.scale.setScalar(.83);stall.add(displayHat);displayHats.push(displayHat);
+    displayHat.position.set([-2.65,-.9,.9,2.65][i],1.68,.61);displayHat.scale.setScalar(.72);stall.add(displayHat);displayHats.push(displayHat);
   }
 
   const sign = new THREE.Group();sign.name='literal-wooden-sign';sign.position.set(40,0,42);sign.rotation.y=Math.atan2(-40,-42);group.add(sign);
@@ -7403,6 +7538,13 @@ function installHubResidents(app, hub) {
       context.fillStyle='#ca9860';context.beginPath();context.ellipse(0,0,69,16,0,0,Math.PI*2);context.fill();
       roundedRectangle(context,-34,-53,68,55,14);context.fill();context.fillStyle='#78503b';context.fillRect(-34,-17,68,12);
       context.fillStyle='#f5d285';context.fillRect(-8,-18,16,14);
+    } else if(id==='propeller') {
+      for(let i=0;i<3;i++){
+        context.fillStyle=['#ef6262','#ffd452','#59a9ed'][i];context.beginPath();context.moveTo(0,-4);context.arc(0,-4,42,Math.PI+i*Math.PI/3,Math.PI+(i+1)*Math.PI/3);context.fill();
+      }
+      context.fillStyle='#59a9ed';context.fillRect(-45,-5,90,8);
+      context.fillStyle='#ffd452';context.fillRect(-3,-63,6,19);
+      context.fillStyle='#ef6262';context.fillRect(-33,-67,66,6);
     } else {
       context.fillStyle='#6c9ccc';context.beginPath();context.arc(0,-4,42,Math.PI,0);context.fill();
       context.fillStyle='#40668e';context.beginPath();context.ellipse(19,1,58,11,.10,0,Math.PI*2);context.fill();
@@ -7421,7 +7563,7 @@ function installHubResidents(app, hub) {
   const overlay=dom_el('div',{class:'hat-shop-overlay',hidden:true},[
     dom_el('section',{class:'hat-shop-card',role:'dialog','aria-modal':'true','aria-label':'Hat shop'},[
       dom_el('header',{class:'hat-shop-heading'},[dom_el('h1',{text:'A hat for Glorb'}),wallet]),
-      dom_el('p',{text:'Earn Stars at the shrines, then choose a hat for your next adventure.'}),
+      dom_el('p',{text:'Earn Stars at the shrines or Fruit Hop behind the hub, then choose a hat.'}),
       dom_el('div',{class:'hat-shop-list'},cards),
       dom_el('footer',{class:'hat-shop-footer'},[
         dom_el('button',{type:'button',text:'No hat',onClick:()=>shop.equip(null)}),
@@ -7455,24 +7597,75 @@ function installHubResidents(app, hub) {
   shop.open=shop.openShop;
   shop.show=shop.openShop;
   const stopPointer=event=>event.stopPropagation();
+  const facts=[
+    'Glorbs invented pockets three years before they invented trousers.',
+    'A Glorb can hear a hat sale from the other side of the moon.',
+    'Our UFO runs on orange peels and extremely confident humming.',
+    'Glorbs call a group of bananas a committee. Nobody knows who is in charge.',
+    'The first Glorb astronaut forgot the moon was round and packed a ladder.',
+    'Every star in the hat shop was polished by a very small, very tired Glorb.',
+    'Glorb clouds taste like toast. Please do not ask how we found out.',
+    'The Dread Warden sleeps with a tiny night-light shaped like a strawberry.',
+    'A propeller hat cannot fly you home, but it makes excellent salad wind.',
+    'Glorbs have never lost a staring contest with a pineapple.',
+    'Tuesday used to be called Glorbsday until everyone kept taking it off.',
+    'The island moves one centimetre whenever every Glorb sneezes at once.'
+  ];
+  let talking=null,nearest=null,lastFact=-1;
+  const factText=dom_el('p'),speaker=dom_el('h2');
+  const another=dom_el('button',{text:'Another fact',onClick:()=>tellFact()});
+  const closeTalk=()=>{
+    talking=null;conversation.hidden=true;app.$store.isDialogVisible=false;
+    hub.scene.getCurrentCamera().unlockPlayer('resident-talk');
+    if(!talkButton.hidden)talkButton.focus();
+  };
+  const conversation=dom_el('div',{class:'hat-shop-overlay',hidden:true},[
+    dom_el('section',{class:'hat-shop-card',role:'dialog','aria-modal':'true','aria-label':'Glorb conversation'},[
+      speaker,factText,dom_el('div',{class:'hat-shop-footer'},[another,dom_el('button',{text:'Bye!',onClick:closeTalk})])
+    ])
+  ]);
+  function tellFact(){
+    const index=(lastFact+1+Math.floor(Math.random()*(facts.length-1)))%facts.length;
+    lastFact=index;factText.textContent=facts[index];
+  }
+  const talkButton=dom_el('button',{class:'hat-browse',text:'Talk',hidden:true,onClick:()=>{
+    if(!nearest||!hub.active||shop.isOpen)return;
+    talking=nearest;speaker.textContent=talking.name;tellFact();conversation.hidden=false;
+    app.$store.isDialogVisible=true;hub.scene.getCurrentCamera().lockPlayer('resident-talk');
+    app.$webgl.movement.set(0,0);another.focus();
+  }});
+  ui.append(talkButton,conversation);
+  shop.conversation={facts,close:closeTalk,get resident(){return talking?.name||null;}};
+  for(const target of [talkButton,conversation])for(const event of ['pointerdown','touchstart','mousedown'])target.addEventListener(event,stopPointer,{passive:true});
   for(const target of [browse,overlay]) for(const event of ['pointerdown','touchstart','mousedown']) target.addEventListener(event,stopPointer,{passive:true});
-  const onKey=event=>{if(shop.isOpen&&event.code==='Escape'){event.preventDefault();event.stopPropagation();shop.close();}};
+  const onKey=event=>{
+    if(event.code==='Escape'){if(talking)closeTalk();else if(shop.isOpen)shop.close();}
+    if(event.code==='KeyE'&&!event.repeat&&!talkButton.hidden&&!talking)talkButton.click();
+    if(talking&&event.code==='Tab'){
+      const buttons=[...conversation.querySelectorAll('button')],index=buttons.indexOf(document.activeElement);
+      event.preventDefault();buttons[(index+(event.shiftKey?-1:1)+buttons.length)%buttons.length].focus();
+    }
+  };
   addEventListener('keydown',onKey);
 
   shop.update=dt=>{
     if(shop.disposed)return;
     group.visible=hub.active;
     ui.hidden=!hub.active;
-    if(!hub.active){if(shop.isOpen)shop.close();return;}
+    if(!hub.active){if(shop.isOpen)shop.close();if(talking)closeTalk();return;}
     dt=Math.min(.05,Math.max(0,dt));visualTime+=dt;
     localPlayer.copy(hub.scene.player.base.position).sub(group.position);
+    nearest=shop.residents.filter(r=>r!==merchant).map(r=>({r,d:Math.hypot(localPlayer.x-r.avatar.group.position.x,localPlayer.z-r.avatar.group.position.z)})).filter(item=>item.d<4.5).sort((a,b)=>a.d-b.d)[0]?.r||null;
+    talkButton.hidden=!nearest||!!talking||shop.isOpen||app.$store.isCustomizeOpen||!!app.__hubDojo?.active;
+    if(nearest)talkButton.textContent='Talk to '+nearest.name+' · E';
+    for(const hat of attachedHats.values())if(hat.userData.rotor)hat.userData.rotor.rotation.y+=dt*9;
     isNearMerchant=Math.hypot(localPlayer.x-17,localPlayer.z-.5)<5.3;
     if(!isNearMerchant)dismissedNearby=false;
-    browse.hidden=!isNearMerchant||shop.isOpen||dismissedNearby||app.$store.isCustomizeOpen;
+    browse.hidden=!isNearMerchant||shop.isOpen||dismissedNearby||app.$store.isCustomizeOpen||!!talking||!talkButton.hidden;
     for(const resident of shop.residents) {
       const root=resident.avatar.group;
       let moving=false;
-      if(resident.route.length&& !shop.isOpen) {
+      if(resident.route.length&& !shop.isOpen && resident!==talking) {
         resident.wait=Math.max(0,resident.wait-dt);
         if(resident.wait===0) {
           const target=resident.route[resident.index];
@@ -7496,7 +7689,7 @@ function installHubResidents(app, hub) {
     }
   };
   shop.dispose=()=>{
-    if(shop.disposed)return;shop.close();shop.disposed=true;
+    if(shop.disposed)return;if(talking)closeTalk();shop.close();shop.disposed=true;
     for(const resident of shop.residents){shop.removeHatFromAvatar(resident.avatar);resident.avatar.dispose();}
     for(const root of [...attachedHats.keys()])shop.removeHatFromAvatar(root);
     for(const hat of displayHats)disposeObjectResources(hat);
@@ -7786,6 +7979,207 @@ function installHubDojo(app, hub) {
   return dojo;
 }
 
+// A short, repeatable hub course. Rewards go through the existing saved wallet.
+function installFruitParkour(app,hub){
+  if(app.__fruitParkour)return app.__fruitParkour;
+  const group=new THREE.Group();group.name='fruit-hop';hub.group.add(group);
+  const definitions=[
+    ['Orange',0,32,.7,0xffa832,0xffd46a],
+    ['Kiwi',-4,36,1.35,0x8a643d,0x91d955],
+    ['Watermelon',0,40,2,0x3b995f,0xfa6f7c],
+    ['Lemon',4,44,2.65,0xf3cc36,0xffea8b],
+    ['Strawberry',0,48,3.3,0xd94764,0xff8b9a],
+    ['Pineapple',-4,51,3.95,0xdca53b,0xffd96a]
+  ];
+  // Continue above the original six fruits as a rising spiral. Each rise
+  // stays within the existing jump's reach; the hub below is unchanged.
+  const upperRoute=[[-8,48],[-10,43],[-8,38],[-4,35],[0,33],[4,35],[8,38],[10,43],[8,48],[4,51],[0,52],[-4,51],[-8,48],[-10,43],[-8,38],[-4,35],[0,33],[4,35]];
+  const fruitTypes=definitions.map(([name,x,z,height,rind,flesh])=>({name,rind,flesh}));
+  upperRoute.forEach(([x,z],i)=>{
+    const fruit=fruitTypes[i%fruitTypes.length];
+    definitions.push([fruit.name,x,z,3.95+(i+1)*.7,fruit.rind,fruit.flesh]);
+  });
+  const finishBonus=12,lapReward=definitions.length*3+finishBonus;
+  const course={group,platforms:[],next:0,complete:false,claimed:new Set(),laps:0,onPlatform:null};
+  app.__fruitParkour=course;
+  const jet={unlocked:false,fuel:1,held:false,touchHeld:false,flying:false};
+  try{jet.unlocked=localStorage.getItem('glorb-hub-jetpack-v1')==='unlocked';}catch{}
+  course.jetpack=jet;
+  const pack=new THREE.Group();pack.name='hub-reward-jetpack';hub.scene.base.add(pack);
+  const flames=[];
+  for(const side of [-1,1]){
+    const tank=new THREE.Mesh(new THREE.CapsuleGeometry(.19,.48,4,10),new THREE.MeshPhongMaterial({color:0x8bdcd6,shininess:55}));
+    tank.position.set(side*.25,1.12,-.4);pack.add(tank);
+    const nozzle=new THREE.Mesh(new THREE.CylinderGeometry(.16,.12,.16,10),new THREE.MeshPhongMaterial({color:0x556581}));
+    nozzle.position.set(side*.25,.72,-.4);pack.add(nozzle);
+    const flame=new THREE.Mesh(new THREE.ConeGeometry(.13,.65,10),new THREE.MeshBasicMaterial({color:0xffcd67,transparent:true,opacity:.85}));
+    flame.position.set(side*.25,.32,-.4);flame.rotation.z=Math.PI;pack.add(flame);flames.push(flame);
+  }
+  const jetButton=dom_el('button',{class:'hub-jet-button',text:'Hold Jet',hidden:true,'aria-label':'Hold jetpack to fly'});
+  jetButton.style.cssText='position:fixed;z-index:75;right:16px;bottom:calc(env(safe-area-inset-bottom) + 110px);padding:12px 16px;border:2px solid white;border-radius:16px;background:#295968;color:white;font:700 13px Outfit,Arial;touch-action:none';
+  document.body.append(jetButton);
+  jetButton.addEventListener('pointerdown',event=>{event.preventDefault();event.stopPropagation();jet.touchHeld=true;jetButton.setPointerCapture(event.pointerId);});
+  for(const type of ['pointerup','pointercancel','lostpointercapture'])jetButton.addEventListener(type,()=>jet.touchHeld=false);
+  addEventListener('keydown',event=>{if(event.code==='Space'&&!event.repeat)jet.held=true;});
+  addEventListener('keyup',event=>{if(event.code==='Space')jet.held=false;});
+  const releaseJet=()=>{jet.held=false;jet.touchHeld=false;};
+  addEventListener('blur',releaseJet);document.addEventListener('visibilitychange',()=>{if(document.hidden)releaseJet();});
+  jet.step=(dt,player)=>{
+    jet.flying=false;
+    if(!jet.unlocked||!hub.active||hub.busy||!player.canMove||document.hidden)return;
+    const wantsJet=jet.held||jet.touchHeld;
+    if(wantsJet&&jet.fuel>0&&player.base.position.y<SPAWN.y+30){
+      player.verticalSpeed=Math.min(7,player.verticalSpeed+48*dt);jet.fuel=Math.max(0,jet.fuel-dt/4);jet.flying=true;
+    }else if(hub.scene.physics.playerIsCollidingGround&&!wantsJet)jet.fuel=Math.min(1,jet.fuel+dt*.4);
+  };
+  const material=color=>new THREE.MeshPhongMaterial({color,flatShading:true,shininess:12});
+  const seedMat=material(0x3c3b32),leafMat=material(0x478c55),gold=material(0xffd75b);
+  function mesh(geometry,surface,x,y,z,parent=group){const m=new THREE.Mesh(geometry,surface);m.position.set(x,y,z);parent.add(m);return m;}
+  const starShape=new THREE.Shape();
+  for(let i=0;i<10;i++){
+    const a=Math.PI/2+i*Math.PI/5,r=i%2?.24:.52;
+    if(i===0)starShape.moveTo(Math.cos(a)*r,Math.sin(a)*r);else starShape.lineTo(Math.cos(a)*r,Math.sin(a)*r);
+  }
+  starShape.closePath();
+  const starGeometry=new THREE.ExtrudeGeometry(starShape,{depth:.16,bevelEnabled:false});
+  for(const [name,x,z,height,rind,flesh] of definitions){
+    const fruit=new THREE.Group();fruit.name='fruit-'+name.toLowerCase();fruit.position.set(x,0,z);group.add(fruit);
+    mesh(new THREE.CylinderGeometry(1.85,1.45,.65,24),material(rind),0,height-.325,0,fruit);
+    mesh(new THREE.CylinderGeometry(1.72,1.72,.055,32),material(flesh),0,height+.005,0,fruit);
+    for(let j=0;j<9;j++){
+      const a=j*Math.PI*2/9;
+      if(name==='Orange'||name==='Lemon'){
+        const line=mesh(new THREE.BoxGeometry(1.35,.018,.04),material(0xfff0c2),Math.cos(a)*.78,height+.04,Math.sin(a)*.78,fruit);line.rotation.y=-a;
+      }else mesh(new THREE.SphereGeometry(.07,6,4),seedMat,Math.cos(a)*1.15,height+.04,Math.sin(a)*1.15,fruit).scale.set(1,.18,1.6);
+    }
+    if(name==='Strawberry'||name==='Pineapple')for(let j=0;j<4;j++){
+      const leaf=mesh(new THREE.ConeGeometry(.16,.8,4),leafMat,1.4,height+.3,(j-1.5)*.18,fruit);leaf.rotation.z=(j-1.5)*.3;
+    }
+    const star=mesh(starGeometry,gold,x,height+1.25,z);
+    course.platforms.push({name,x,z,height,radius:1.75,star});
+  }
+  const signCanvas=document.createElement('canvas');signCanvas.width=640;signCanvas.height=192;
+  const ctx=signCanvas.getContext('2d');
+  const signTexture=new THREE.CanvasTexture(signCanvas);
+  function drawSign(){
+    ctx.fillStyle='#fff0cd';ctx.fillRect(0,0,640,192);ctx.textAlign='center';ctx.fillStyle='#416044';
+    ctx.font='800 56px Outfit,Arial';ctx.fillText('FRUIT HOP',320,70);
+    ctx.font='700 29px Outfit,Arial';ctx.fillText('Jump the fruit. Collect Stars.',320,119);
+    ctx.fillText('REWARD:',285,165);drawJetIcon(ctx,370,132,1);signTexture.needsUpdate=true;
+  }
+  drawSign();document.fonts?.ready?.then(drawSign);
+  const sign=new THREE.Sprite(new THREE.SpriteMaterial({map:signTexture}));sign.position.set(-5,2.6,28);sign.scale.set(5,1.5,1);group.add(sign);
+  mesh(new THREE.CylinderGeometry(2.3,2.3,.10,32),material(0xffe5a0),0,.08,27);
+  const status=dom_el('div',{class:'fruit-hop-status',role:'status',hidden:true});document.body.append(status);
+  function drawJetIcon(context,x,y,scale){context.save();context.translate(x,y);context.scale(scale,scale);context.fillStyle='#416574';context.fillRect(8,10,30,17);for(const dx of [0,27]){context.fillStyle='#64cfc8';context.fillRect(dx,0,18,28);context.fillStyle='#416574';context.fillRect(dx,25,18,6);context.fillStyle='#ffad43';context.beginPath();context.moveTo(dx+2,32);context.lineTo(dx+9,44);context.lineTo(dx+16,32);context.fill();}context.restore();}
+  const statusText=dom_el('div'),reward=dom_el('div',{text:'REWARD: '});
+  const rewardIcon=document.createElement('canvas');rewardIcon.width=48;rewardIcon.height=46;rewardIcon.setAttribute('role','img');rewardIcon.setAttribute('aria-label','Jetpack');rewardIcon.style.cssText='width:30px;height:29px;vertical-align:middle';drawJetIcon(rewardIcon.getContext('2d'),1,0,1);reward.append(rewardIcon);status.append(statusText,reward);
+  const style=dom_el('style',{text:`.fruit-hop-status{position:fixed;z-index:72;left:50%;bottom:calc(env(safe-area-inset-bottom) + 155px);transform:translateX(-50%);width:min(300px,calc(100% - 36px));padding:10px 14px;border-radius:16px;background:#fff0d9ef;color:#315442;text-align:center;font:700 14px Outfit,Arial;pointer-events:none;box-shadow:0 3px 12px #19392430}`});document.head.append(style);
+  status.style.whiteSpace='pre-line';
+  let clock=0,lastText='';
+  course.floorAt=(x,z,previousY)=>{
+    if(!hub.active)return SPAWN.y;
+    let floor=SPAWN.y;
+    for(const p of course.platforms){
+      const y=SPAWN.y+p.height;
+      if(Math.hypot(x-hub.group.position.x-p.x,z-hub.group.position.z-p.z)<p.radius && previousY>=y-.04)floor=Math.max(floor,y);
+    }
+    return floor;
+  };
+  course.update=dt=>{
+    group.visible=hub.active;
+    const player=hub.scene.player;
+    pack.visible=jet.unlocked&&hub.active;pack.position.copy(player.base.position);pack.rotation.y=player.base.rotation.y;
+    flames.forEach(flame=>{flame.visible=jet.flying&&hub.active;flame.scale.y=.8+Math.sin(clock*35)*.2;});
+    jetButton.hidden=!jet.unlocked||!hub.active||app.$store.isDialogVisible||app.$store.isCustomizeOpen||app.__hatShop?.isOpen;
+    jetButton.textContent=`Hold Jet · ${Math.round(jet.fuel*100)}%`;
+    if(!hub.active){releaseJet();jet.flying=false;}
+    const x=player.base.position.x-hub.group.position.x,z=player.base.position.z-hub.group.position.z;
+    status.hidden=!hub.active||z<25||Math.abs(x)>15||app.$store.isDialogVisible||app.__hatShop?.isOpen;
+    if(!hub.active)return;
+    clock+=dt;
+    course.platforms.forEach((p,i)=>{p.star.visible=!course.claimed.has(i);p.star.rotation.y=clock*1.8;p.star.position.y=p.height+1.25+Math.sin(clock*3+i)*.12;});
+    const grounded=hub.scene.physics.playerIsCollidingGround;
+    const landed=grounded?course.platforms.findIndex(p=>Math.hypot(x-p.x,z-p.z)<p.radius&&Math.abs(player.base.position.y-(SPAWN.y+p.height))<.06):-1;
+    course.onPlatform=landed<0?null:landed;
+    if(landed===course.next && !course.complete){
+      if(!course.claimed.has(landed)){course.claimed.add(landed);app.__hatShop.addStars(3);app.$webgl.audio.playSound('fruit_star_quest');}
+      course.next++;
+      if(course.next===course.platforms.length){
+        course.complete=true;course.laps++;app.__hatShop.addStars(finishBonus);app.$webgl.audio.playSound('fruit_finish_quest');
+        jet.unlocked=true;jet.fuel=1;
+        hub.completeActivity('fruit-hop');
+        try{localStorage.setItem('glorb-hub-jetpack-v1','unlocked');}catch{}
+      }
+    }
+    if(grounded&&landed<0&&!course.complete)course.next=0;
+    if(course.complete&&Math.hypot(x,z-27)<2.3&&grounded){course.complete=false;course.next=0;course.claimed.clear();}
+    const text=course.complete?`+${lapReward} Stars! Jetpack unlocked!\nHold Space / Jet to fly. Land to refill fuel.`:
+      `Fruit Hop ${course.next}/${course.platforms.length} · ${app.__hatShop.state.stars} Stars\nSpace / Jump to the next fruit. Falling is safe.`;
+    if(text!==lastText){lastText=text;statusText.textContent=text;}
+  };
+  return course;
+}
+
+// Keep the original 3D runner and its reachable obstacle patterns.
+const originalTempleStep=stepRunner;
+stepRunner=function(run,seconds){originalTempleStep(run,seconds*(run.hardMode?1.22:1));};
+function installTempleRush(app){
+  const runner=installRunner(app);
+  for(const name of ['open','start']){
+    const original=runner[name];
+    runner[name]=function(...args){const result=original.apply(this,args);runner.run.hardMode=true;return result;};
+  }
+  // Original 144 BPM electro score, generated locally with no remote assets.
+  const music={bus:null,next:0,step:0,notes:0,playing:false};runner.music=music;
+  function note(context,time,frequency,duration,type,level,endFrequency){
+    const osc=context.createOscillator(),gain=context.createGain();osc.type=type;
+    osc.frequency.setValueAtTime(frequency,time);
+    if(endFrequency)osc.frequency.exponentialRampToValueAtTime(endFrequency,time+duration);
+    gain.gain.setValueAtTime(.0001,time);gain.gain.exponentialRampToValueAtTime(level,time+.006);
+    gain.gain.exponentialRampToValueAtTime(.0001,time+duration);
+    osc.connect(gain);gain.connect(music.bus);osc.start(time);osc.stop(time+duration+.02);
+    osc.onended=()=>{osc.disconnect();gain.disconnect();};music.notes++;
+  }
+  setInterval(()=>{
+    const audio=app.$webgl?.audio,context=audio?.context;if(!context)return;
+    if(!music.bus){music.bus=context.createGain();music.bus.gain.value=0;music.bus.connect(audio.musicBus);}
+    const playing=runner.active&&runner.run.phase==='running'&&!document.hidden&&!app.$store.isAudioMuted;
+    music.bus.gain.setTargetAtTime(playing?10**(-8/20):0,context.currentTime,.04);
+    music.playing=playing;
+    if(!playing||context.state!=='running'){music.next=context.currentTime+.03;return;}
+    if(music.next<context.currentTime)music.next=context.currentTime+.02;
+    while(music.next<context.currentTime+.12){
+      const s=music.step++,t=music.next,beat=s%16,root=[55,43.65,65.41,49][Math.floor(s/32)%4];
+      if(beat%4===0)note(context,t,150,.18,'sine',.7,42);
+      if(beat%8===4){note(context,t,190,.09,'triangle',.22,80);note(context,t,1900,.055,'square',.055,700);}
+      if(beat%2===0)note(context,t,7600,.025,'square',.035,4500);
+      if(beat%2===0)note(context,t,root*(beat===14?2:1),.16,'sawtooth',.16);
+      const melody=[0,7,12,15,12,7,3,10];
+      if(beat%2===1)note(context,t,root*4*2**(melody[Math.floor(beat/2)]/12),.13,'triangle',.2);
+      music.next+=60/144/4;
+    }
+  },40);
+  return runner;
+}
+
+function installHubUfoParking(app,hub){
+  const pad=new THREE.Group();pad.name='hub-ufo-parking';pad.position.set(-35,.08,-39);hub.group.add(pad);
+  const platform=new THREE.Mesh(new THREE.CylinderGeometry(5.4,5.7,.2,48),new THREE.MeshPhongMaterial({color:0x647b86}));pad.add(platform);
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(4.8,.08,8,48),new THREE.MeshBasicMaterial({color:0x98f3dc}));ring.rotation.x=Math.PI/2;ring.position.y=.14;pad.add(ring);
+  const original=app.$webgl.scenes.list.IslandIntro.main;
+  const parked=original.clone(true);parked.name='parked-arrival-ufo';
+  const bounds=new THREE.Box3().setFromObject(parked),size=bounds.getSize(new THREE.Vector3());
+  parked.scale.multiplyScalar(7.5/Math.max(size.x,size.z));
+  const adjusted=new THREE.Box3().setFromObject(parked),center=adjusted.getCenter(new THREE.Vector3());
+  parked.position.add(new THREE.Vector3(-center.x,.55-adjusted.min.y,-center.z));pad.add(parked);
+  for(const x of [-2,2])for(const z of [-1.5,1.5]){const leg=new THREE.Mesh(new THREE.CylinderGeometry(.12,.22,.6,8),new THREE.MeshPhongMaterial({color:0x334754}));leg.position.set(x,.4,z);pad.add(leg);}
+  const label=document.createElement('canvas');label.width=512;label.height=96;const ctx=label.getContext('2d');ctx.fillStyle='#233f4a';ctx.fillRect(0,0,512,96);ctx.fillStyle='#c6ffe8';ctx.font='bold 36px Arial';ctx.textAlign='center';ctx.fillText('GLORB’S LANDING PAD',256,60);
+  const sign=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(label)}));sign.position.set(0,2,5.6);sign.scale.set(6,1.12,1);pad.add(sign);
+  hub.group.userData.colliders.push({kind:'circle',x:-35,z:-39,radius:3.8});
+  app.__hubUfoParking={group:pad,ship:parked};
+}
+
 function installHub(app) {
   if (app.__hub) return app.__hub;
   const c = {
@@ -7812,7 +8206,7 @@ function installHub(app) {
   function tintSharedPlayer(activity) {
     rememberHubColor();c.scene.player.mesh.material.color.set(GLORB_ACTIVITY_COLORS[activity]);
   }
-  const requiredActivities=['survival','runner','ufo-flight','bubble-blitz'];
+  const requiredActivities=['survival','runner','ufo-flight','bubble-blitz','fruit-hop'];
   const campaignKey='glorb-campaign-v1';
   const completed=new Set();
   let bossDefeated=false;
@@ -7823,14 +8217,15 @@ function installHub(app) {
       bossDefeated=saved.bossDefeated===true;
     }
   } catch(error) {                                                                       }
+  try {if(localStorage.getItem('glorb-hub-jetpack-v1')==='unlocked')completed.add('fruit-hop');} catch {}
   app.__campaign={completed,bossDefeated};
-  let readyReminder=requiredActivities.every(id=>completed.has(id))&&!bossDefeated;
+  let readyReminder=completed.size>=4&&!bossDefeated;
   const rewardedRuns=new WeakSet();
   function saveCampaign() {
     try {localStorage.setItem(campaignKey,JSON.stringify({version:1,completed:[...completed],bossDefeated:app.__campaign.bossDefeated}));}
     catch(error) {                                                      }
   }
-  c.isBossUnlocked=()=>requiredActivities.every(id=>completed.has(id));
+  c.isBossUnlocked=()=>completed.size>=4;
   c.completeActivity=id=>{
     if(!requiredActivities.includes(id)||completed.has(id)) return false;
     completed.add(id);
@@ -7843,7 +8238,7 @@ function installHub(app) {
     if(!c.isBossUnlocked()||app.__campaign.bossDefeated)return false;
     app.__campaign.bossDefeated=true;saveCampaign();paintCampaign();return true;
   };
-  installRunner(app);
+  installTempleRush(app);
   const style=dom_el('style',{text:`
     .hub-ui{position:fixed;inset:0;z-index:65;pointer-events:none;font-family:Outfit,sans-serif;color:#163e39}
     .hub-ui[hidden],.hub-ui [hidden]{display:none!important}
@@ -7882,7 +8277,7 @@ function installHub(app) {
     clearTimeout(noticeTimeout);noticeTimeout=setTimeout(()=>{notice.hidden=true;},3200);
   }
   function paintCampaign() {
-    c.group?.userData.setBossProgress?.(completed.size,c.isBossUnlocked(),app.__campaign.bossDefeated);
+    c.group?.userData.setBossProgress?.(Math.min(4,completed.size),c.isBossUnlocked(),app.__campaign.bossDefeated);
   }
   const back = dom_el('button', {
     class: 'hub-return',
@@ -7944,7 +8339,9 @@ function installHub(app) {
       ...scene.player.cameraOptions
     };
     c.group = buildHub(scene);
+    installHubUfoParking(app,c);
     if(typeof installHubResidents==='function')installHubResidents(app,c);
+    installFruitParkour(app,c);
     if(typeof installHubDojo==='function')installHubDojo(app,c);
     paintCampaign();
     c.shrines = c.group.userData.shrines || [
@@ -7958,6 +8355,10 @@ function installHub(app) {
       if (!c.active || c.busy || !c.group?.visible) return false;
       const player = c.scene.player,
         position = player.base.position;
+      // Hub fences and shrubs are ground obstacles, not infinite walls
+      // through the elevated fruit course.
+      if(app.__fruitParkour && position.y>SPAWN.y+4 &&
+        Math.abs(position.x-c.group.position.x)<13 && position.z-c.group.position.z>29)return false;
       if (!resolveHubCollision(position, c.group.userData.colliders, c.group.position)) return false;
       player.body?.position?.set(position.x, player.body.position.y, position.z);
       c.scene.physics.playerPosition?.set(position.x, c.scene.physics.playerPosition.y, position.z);
@@ -8038,7 +8439,7 @@ function installHub(app) {
     if (!app.__runner?.active || c.busy) return;
     c.busy = true;
     try {
-      if(app.__runner.run.missionComplete||app.__runner.run.coins>=50) c.completeActivity('runner');
+      if(app.__runner.run.missionComplete) c.completeActivity('runner');
       app.__runner.close();
       c.active = true;
       restoreHubColor();
@@ -8053,7 +8454,7 @@ function installHub(app) {
   c.enterQuickGame = async id => {
     if (!c.active || c.busy || app.$store.isCustomizeOpen) return;
     if(id==='boss'&&!c.isBossUnlocked()) {
-      showNotice(`Dread Shrine is sealed. Complete all four games: ${completed.size}/4 earned.`);
+      showNotice(`Dread Shrine is sealed. Complete any four games: ${completed.size}/4 earned.`);
       return;
     }
     const controller = id === 'ufo-flight' ? installUfoFlight(app)
@@ -8114,12 +8515,12 @@ function installHub(app) {
         ['survival',app.__survival?.run,40],['runner',app.__runner?.run,30],
         ['ufo-flight',app.__ufoFlight?.run,35],['bubble-blitz',app.__bubbleBlitz?.run,35],['boss',app.__bossFight?.run,80]
       ]){
-        const won=id==='runner'?(run?.missionComplete||run?.coins>=50):run?.phase==='won';
+        const won=id==='runner'?run?.missionComplete:run?.phase==='won';
         if(won&&run&&!rewardedRuns.has(run)&&app.__hatShop){rewardedRuns.add(run);app.__hatShop.addStars(amount);}
       }
 
       if(app.__survival?.run?.phase==='won') c.completeActivity('survival');
-      if(app.__runner?.run?.missionComplete||app.__runner?.run?.coins>=50) c.completeActivity('runner');
+      if(app.__runner?.run?.missionComplete) c.completeActivity('runner');
       if(app.__ufoFlight?.run?.phase==='won') c.completeActivity('ufo-flight');
       if(app.__bubbleBlitz?.run?.phase==='won') c.completeActivity('bubble-blitz');
       if(app.__bossFight?.run?.phase==='won') c.completeBoss();
@@ -8136,7 +8537,7 @@ function installHub(app) {
       else if (shrine?.id === 'ufo-flight' || shrine?.id === 'bubble-blitz') c.enterQuickGame(shrine.id);
       else if(shrine?.id==='boss') {
         if(c.isBossUnlocked()) c.enterQuickGame('boss');
-        else if(c.nearbyShrine!=='boss') showNotice(`Dread Shrine is sealed. Complete all four games: ${completed.size}/4 earned.`);
+        else if(c.nearbyShrine!=='boss') showNotice(`Dread Shrine is sealed. Complete any four games: ${completed.size}/4 earned.`);
       }
       c.nearbyShrine = shrine?.id || null;
     });
